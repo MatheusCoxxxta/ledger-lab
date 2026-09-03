@@ -17,8 +17,8 @@ const RAMP_MS          = 150;   // ms between each user start
 const WEIGHTS = {
   health:     25,   // GET /health            — hot probe
   createAcct: 20,   // POST /accounts         — account creation
-  send:       35,   // POST /send             — transfer (hot write)
-  deactivate: 20,   // PATCH /accounts/:id/deactivate — the changed endpoint
+  send:       45,   // POST /send             — transfer (hot write)
+  deactivate: 10,   // PATCH /accounts/:id/deactivate — the changed endpoint
 };
 
 const SEED_LIMIT    = 30;    // max real rows pulled from local DB
