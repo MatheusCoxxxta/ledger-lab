@@ -67,6 +67,26 @@ const updateBalance = async (dbClient, account_id, direction, amount) => {
     return result.rows[0];
 };
 
+const deactivateAccount = async (dbClient, account_id) => {
+    const result = await dbClient.query(
+        `UPDATE accounts
+         SET deactivated_at = NOW()
+         WHERE id = $1 AND deactivated_at IS NULL
+         RETURNING id, name, currency, balance, created_at, deactivated_at`,
+        [account_id]
+    );
+
+    if (result.rows[0]) {
+        return { account: result.rows[0] };
+    }
+
+    const existing = await selectAccount(dbClient, account_id);
+    if (!existing) {
+        return { notFound: true };
+    }
+    return { alreadyDeactivated: true };
+};
+
 const insertAccount = async (dbClient, name, currency, balance) => {
     const result = await dbClient.query(
         `INSERT INTO accounts (name, currency, balance)
@@ -114,6 +134,10 @@ app.post("/send", async (req, res) => {
             return res.status(400).json({ message: "sender account not found" });
         }
 
+        if (senderAccount.deactivated_at !== null) {
+            return res.status(400).json({ message: "sender account is deactivated" });
+        }
+
         if (senderAccount.balance <= 0 || senderAccount.balance - body.amount < 0) {
             return res.status(400).json({ message: "insuficient balance" });
         }
@@ -124,9 +148,18 @@ app.post("/send", async (req, res) => {
             return res.status(400).json({ message: "receiver account not found" });
         }
 
+        if (receiverAccount.deactivated_at !== null) {
+            return res.status(400).json({ message: "receiver account is deactivated" });
+        }
+
         await dbClient.query("BEGIN;");
 
         const lockedSenderAccount = await lockSelectAccount(dbClient, body.sender_id);
+
+        if (lockedSenderAccount.deactivated_at !== null) {
+            await dbClient.query("ROLLBACK");
+            return res.status(400).json({ message: "sender account is deactivated" });
+        }
 
         if (lockedSenderAccount.balance <= 0 || lockedSenderAccount.balance - body.amount < 0) {
             await dbClient.query("ROLLBACK");
@@ -134,6 +167,11 @@ app.post("/send", async (req, res) => {
         }
 
         const lockedReceiverAccount = await lockSelectAccount(dbClient, body.receiver_id);
+
+        if (lockedReceiverAccount.deactivated_at !== null) {
+            await dbClient.query("ROLLBACK");
+            return res.status(400).json({ message: "receiver account is deactivated" });
+        }
 
         const transaction = await atomicGetTransaction(dbClient, body.idempotency_key, body.sender_id, body.amount);
 
@@ -152,6 +190,32 @@ app.post("/send", async (req, res) => {
         }
 
         await dbClient.query("ROLLBACK");
+    } finally {
+        dbClient.release();
+    }
+});
+
+app.patch("/accounts/:id/deactivate", async (req, res) => {
+    const { id } = req.params;
+    const dbClient = await pool.connect();
+
+    try {
+        const result = await deactivateAccount(dbClient, id);
+
+        if (result.notFound) {
+            return res.status(404).json({ message: "account not found" });
+        }
+
+        if (result.alreadyDeactivated) {
+            return res.status(409).json({ message: "account already deactivated" });
+        }
+
+        return res.json(result.account);
+    } catch (error) {
+        if (error.code === "22P02") {
+            return res.status(400).json({ message: "invalid account id" });
+        }
+        throw error;
     } finally {
         dbClient.release();
     }

@@ -31,3 +31,6 @@ CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions (created_
 CREATE INDEX IF NOT EXISTS idx_entries_account_id ON entries (account_id);
 CREATE INDEX IF NOT EXISTS idx_entries_transaction_id ON entries (transaction_id);
 CREATE INDEX IF NOT EXISTS idx_entries_created_at ON entries (created_at);
+
+ALTER TABLE accounts
+    ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMPTZ NULL;
