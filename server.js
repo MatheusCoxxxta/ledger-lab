@@ -56,7 +56,7 @@ const createEntry = async (dbClient, transaction_id, account_id, direction, amou
 
 const updateBalance = async (dbClient, account_id, direction, amount) => {
     const delta = direction === "credit" ? amount : -amount;
-    
+
     const result = await dbClient.query(
             `UPDATE accounts
             SET balance = balance + $1
@@ -64,6 +64,16 @@ const updateBalance = async (dbClient, account_id, direction, amount) => {
             [delta, account_id]
     );
 
+    return result.rows[0];
+};
+
+const insertAccount = async (dbClient, name, currency, balance) => {
+    const result = await dbClient.query(
+        `INSERT INTO accounts (name, currency, balance)
+         VALUES ($1, $2, $3)
+         RETURNING id, name, currency, balance, created_at`,
+        [name, currency, balance]
+    );
     return result.rows[0];
 };
 
@@ -126,6 +136,31 @@ app.post("/send", async (req, res) => {
         }
 
         await dbClient.query("ROLLBACK");
+    } finally {
+        dbClient.release();
+    }
+});
+
+app.post("/accounts", async (req, res) => {
+    const { name, currency = "BRL", balance = 0 } = req.body;
+
+    if (!name || name.trim() === "") {
+        return res.status(400).json({ message: "name is required" });
+    }
+
+    if (typeof currency !== "string" || !/^[A-Za-z]{3}$/.test(currency)) {
+        return res.status(400).json({ message: "currency must be a 3-letter string" });
+    }
+
+    if (typeof balance !== "number" || balance < 0) {
+        return res.status(400).json({ message: "balance must be a non-negative number" });
+    }
+
+    const dbClient = await pool.connect();
+
+    try {
+        const account = await insertAccount(dbClient, name.trim(), currency.toUpperCase(), balance);
+        return res.status(201).json(account);
     } finally {
         dbClient.release();
     }
