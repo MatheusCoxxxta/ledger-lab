@@ -77,6 +77,22 @@ const insertAccount = async (dbClient, name, currency, balance) => {
     return result.rows[0];
 };
 
+const validateCreateAccountBody = ({ name, currency, balance }) => {
+    if (!name || name.trim() === "") {
+        return "name is required";
+    }
+
+    if (typeof currency !== "string" || !/^[A-Za-z]{3}$/.test(currency)) {
+        return "currency must be a 3-letter string";
+    }
+
+    if (typeof balance !== "number" || balance < 0) {
+        return "balance must be a non-negative number";
+    }
+
+    return null;
+};
+
 app.get("/health", async (_req, res) => {
     const result = await pool.query("SELECT NOW()");
     res.json({ status: "ok", time: result.rows[0].now });
@@ -144,16 +160,9 @@ app.post("/send", async (req, res) => {
 app.post("/accounts", async (req, res) => {
     const { name, currency = "BRL", balance = 0 } = req.body;
 
-    if (!name || name.trim() === "") {
-        return res.status(400).json({ message: "name is required" });
-    }
-
-    if (typeof currency !== "string" || !/^[A-Za-z]{3}$/.test(currency)) {
-        return res.status(400).json({ message: "currency must be a 3-letter string" });
-    }
-
-    if (typeof balance !== "number" || balance < 0) {
-        return res.status(400).json({ message: "balance must be a non-negative number" });
+    const validationError = validateCreateAccountBody({ name, currency, balance });
+    if (validationError) {
+        return res.status(400).json({ message: validationError });
     }
 
     const dbClient = await pool.connect();
