@@ -30,6 +30,7 @@ app.use((err, req, res, next) => {
         return res.status(e.status).json({ message: e.message });
     }
     if (err.code === "22P02") {
+        console.error(err);
         const e = new InvalidAccountIdError();
         return res.status(e.status).json({ message: e.message });
     }
