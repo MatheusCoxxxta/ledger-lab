@@ -1,4 +1,10 @@
 const pool = require("../db");
+const SenderNotFoundError = require("../errors/SenderNotFoundError");
+const SenderDeactivatedError = require("../errors/SenderDeactivatedError");
+const InsufficientBalanceError = require("../errors/InsufficientBalanceError");
+const ReceiverNotFoundError = require("../errors/ReceiverNotFoundError");
+const ReceiverDeactivatedError = require("../errors/ReceiverDeactivatedError");
+const DuplicateTransactionError = require("../errors/DuplicateTransactionError");
 const accountRepository = require("../repositories/accountRepository");
 const transactionRepository = require("../repositories/transactionRepository");
 const entryRepository = require("../repositories/entryRepository");
@@ -7,47 +13,37 @@ const send = async ({ sender_id, receiver_id, amount, idempotency_key }) => {
     const client = await pool.connect();
     try {
         const sender = await accountRepository.findById(client, sender_id);
-        if (!sender) return { error: "SENDER_NOT_FOUND" };
-        if (sender.deactivated_at) return { error: "SENDER_DEACTIVATED" };
-        if (sender.balance <= 0 || sender.balance - amount < 0) return { error: "INSUFFICIENT_BALANCE" };
+        if (!sender) throw new SenderNotFoundError();
+        if (sender.deactivated_at) throw new SenderDeactivatedError();
+        if (sender.balance <= 0 || sender.balance - amount < 0) throw new InsufficientBalanceError();
 
         const receiver = await accountRepository.findById(client, receiver_id);
-        if (!receiver) return { error: "RECEIVER_NOT_FOUND" };
-        if (receiver.deactivated_at) return { error: "RECEIVER_DEACTIVATED" };
+        if (!receiver) throw new ReceiverNotFoundError();
+        if (receiver.deactivated_at) throw new ReceiverDeactivatedError();
 
         await client.query("BEGIN");
+        try {
+            const lockedSender = await accountRepository.findByIdForUpdate(client, sender_id);
+            if (lockedSender.deactivated_at) throw new SenderDeactivatedError();
+            if (lockedSender.balance <= 0 || lockedSender.balance - amount < 0) throw new InsufficientBalanceError();
 
-        const lockedSender = await accountRepository.findByIdForUpdate(client, sender_id);
-        if (lockedSender.deactivated_at) {
-            await client.query("ROLLBACK");
-            return { error: "SENDER_DEACTIVATED" };
-        }
-        if (lockedSender.balance <= 0 || lockedSender.balance - amount < 0) {
-            await client.query("ROLLBACK");
-            return { error: "INSUFFICIENT_BALANCE" };
-        }
+            const lockedReceiver = await accountRepository.findByIdForUpdate(client, receiver_id);
+            if (lockedReceiver.deactivated_at) throw new ReceiverDeactivatedError();
 
-        const lockedReceiver = await accountRepository.findByIdForUpdate(client, receiver_id);
-        if (lockedReceiver.deactivated_at) {
-            await client.query("ROLLBACK");
-            return { error: "RECEIVER_DEACTIVATED" };
-        }
+            const transaction = await transactionRepository.insert(client, idempotency_key, sender_id, amount);
+            await entryRepository.insert(client, lockedSender.id, transaction.id, "debit", amount);
+            await entryRepository.insert(client, lockedReceiver.id, transaction.id, "credit", amount);
+            await accountRepository.updateBalance(client, sender_id, "debit", amount);
+            await accountRepository.updateBalance(client, receiver_id, "credit", amount);
 
-        const transaction = await transactionRepository.insert(client, idempotency_key, sender_id, amount);
-        await entryRepository.insert(client, lockedSender.id, transaction.id, "debit", amount);
-        await entryRepository.insert(client, lockedReceiver.id, transaction.id, "credit", amount);
-        await accountRepository.updateBalance(client, sender_id, "debit", amount);
-        await accountRepository.updateBalance(client, receiver_id, "credit", amount);
-
-        await client.query("COMMIT");
-        return {};
-    } catch (error) {
-        if (error.code === "23505" && error.constraint === "transactions_idempotency_key_key") {
+            await client.query("COMMIT");
+        } catch (error) {
             await client.query("ROLLBACK");
-            return { duplicateKey: true };
+            if (error.code === "23505" && error.constraint === "transactions_idempotency_key_key") {
+                throw new DuplicateTransactionError();
+            }
+            throw error;
         }
-        await client.query("ROLLBACK");
-        throw error;
     } finally {
         client.release();
     }
