@@ -1,5 +1,4 @@
 const pool = require("../db");
-const InvalidAmountError = require("../errors/InvalidAmountError");
 const SenderNotFoundError = require("../errors/SenderNotFoundError");
 const SenderDeactivatedError = require("../errors/SenderDeactivatedError");
 const InsufficientBalanceError = require("../errors/InsufficientBalanceError");
@@ -8,35 +7,36 @@ const ReceiverDeactivatedError = require("../errors/ReceiverDeactivatedError");
 const accountRepository = require("../repositories/accountRepository");
 const transactionRepository = require("../repositories/transactionRepository");
 const entryRepository = require("../repositories/entryRepository");
+const { sendSchema } = require("./schemas/sendSchema");
 
 const send = async ({ sender_id, receiver_id, amount, idempotency_key }) => {
-    if (amount == null || amount <= 0) throw new InvalidAmountError();
+    const data = sendSchema.parse({ sender_id, receiver_id, amount, idempotency_key });
 
     const client = await pool.connect();
     try {
-        const sender = await accountRepository.findById(client, sender_id);
+        const sender = await accountRepository.findById(client, data.sender_id);
         if (!sender) throw new SenderNotFoundError();
         if (sender.deactivated_at) throw new SenderDeactivatedError();
-        if (sender.balance <= 0 || sender.balance - amount < 0) throw new InsufficientBalanceError();
+        if (sender.balance <= 0 || sender.balance - data.amount < 0) throw new InsufficientBalanceError();
 
-        const receiver = await accountRepository.findById(client, receiver_id);
+        const receiver = await accountRepository.findById(client, data.receiver_id);
         if (!receiver) throw new ReceiverNotFoundError();
         if (receiver.deactivated_at) throw new ReceiverDeactivatedError();
 
         await client.query("BEGIN");
         try {
-            const lockedSender = await accountRepository.findByIdForUpdate(client, sender_id);
+            const lockedSender = await accountRepository.findByIdForUpdate(client, data.sender_id);
             if (lockedSender.deactivated_at) throw new SenderDeactivatedError();
-            if (lockedSender.balance <= 0 || lockedSender.balance - amount < 0) throw new InsufficientBalanceError();
+            if (lockedSender.balance <= 0 || lockedSender.balance - data.amount < 0) throw new InsufficientBalanceError();
 
-            const lockedReceiver = await accountRepository.findByIdForUpdate(client, receiver_id);
+            const lockedReceiver = await accountRepository.findByIdForUpdate(client, data.receiver_id);
             if (lockedReceiver.deactivated_at) throw new ReceiverDeactivatedError();
 
-            const transaction = await transactionRepository.insert(client, idempotency_key, sender_id, amount);
-            await entryRepository.insert(client, lockedSender.id, transaction.id, "debit", amount);
-            await entryRepository.insert(client, lockedReceiver.id, transaction.id, "credit", amount);
-            await accountRepository.updateBalance(client, sender_id, "debit", amount);
-            await accountRepository.updateBalance(client, receiver_id, "credit", amount);
+            const transaction = await transactionRepository.insert(client, data.idempotency_key, data.sender_id, data.amount);
+            await entryRepository.insert(client, lockedSender.id, transaction.id, "debit", data.amount);
+            await entryRepository.insert(client, lockedReceiver.id, transaction.id, "credit", data.amount);
+            await accountRepository.updateBalance(client, data.sender_id, "debit", data.amount);
+            await accountRepository.updateBalance(client, data.receiver_id, "credit", data.amount);
 
             await client.query("COMMIT");
         } catch (error) {
