@@ -1,5 +1,7 @@
-const insert = async (client, idempotency_key, account_id, amount) => {
-    const result = await client.query(
+const pool = require("../db");
+
+const insert = async (idempotency_key, account_id, amount, executor = pool) => {
+    const result = await executor.query(
         `INSERT INTO transactions (idempotency_key, account_id, amount)
          VALUES ($1, $2, $3)
          RETURNING *`,
