@@ -1,4 +1,5 @@
 const pool = require("../db");
+const InvalidAmountError = require("../errors/InvalidAmountError");
 const SenderNotFoundError = require("../errors/SenderNotFoundError");
 const SenderDeactivatedError = require("../errors/SenderDeactivatedError");
 const InsufficientBalanceError = require("../errors/InsufficientBalanceError");
@@ -9,6 +10,8 @@ const transactionRepository = require("../repositories/transactionRepository");
 const entryRepository = require("../repositories/entryRepository");
 
 const send = async ({ sender_id, receiver_id, amount, idempotency_key }) => {
+    if (amount == null || amount <= 0) throw new InvalidAmountError();
+
     const client = await pool.connect();
     try {
         const sender = await accountRepository.findById(client, sender_id);
