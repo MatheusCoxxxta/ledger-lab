@@ -3,7 +3,6 @@ const { deactivateAccount: deactivateAccountUsecase } = require("../usecases/dea
 
 const createAccount = async (req, res) => {
     const result = await createAccountUsecase(req.body);
-    if (result.error) return res.status(400).json({ message: result.error });
     return res.status(201).json(result.account);
 };
 

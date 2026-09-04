@@ -1,10 +1,12 @@
 require("dotenv").config();
 
 const express = require("express");
+const { ZodError } = require("zod");
 const healthController = require("./src/controllers/healthController");
 const accountController = require("./src/controllers/accountController");
 const transactionController = require("./src/controllers/transactionController");
 const AppError = require("./src/errors/AppError");
+const ValidationError = require("./src/errors/ValidationError");
 const DuplicateTransactionError = require("./src/errors/DuplicateTransactionError");
 const InvalidAccountIdError = require("./src/errors/InvalidAccountIdError");
 
@@ -18,6 +20,10 @@ app.patch("/accounts/:id/deactivate", accountController.deactivateAccount);
 app.post("/send", transactionController.send);
 
 app.use((err, req, res, next) => {
+    if (err instanceof ZodError) {
+        const e = new ValidationError(err);
+        return res.status(e.status).json({ message: e.message, errors: e.errors });
+    }
     if (err instanceof AppError) return res.status(err.status).json({ message: err.message });
     if (err.code === "23505" && err.constraint === "transactions_idempotency_key_key") {
         const e = new DuplicateTransactionError();
