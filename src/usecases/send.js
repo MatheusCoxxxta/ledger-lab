@@ -4,7 +4,6 @@ const SenderDeactivatedError = require("../errors/SenderDeactivatedError");
 const InsufficientBalanceError = require("../errors/InsufficientBalanceError");
 const ReceiverNotFoundError = require("../errors/ReceiverNotFoundError");
 const ReceiverDeactivatedError = require("../errors/ReceiverDeactivatedError");
-const DuplicateTransactionError = require("../errors/DuplicateTransactionError");
 const accountRepository = require("../repositories/accountRepository");
 const transactionRepository = require("../repositories/transactionRepository");
 const entryRepository = require("../repositories/entryRepository");
@@ -39,9 +38,6 @@ const send = async ({ sender_id, receiver_id, amount, idempotency_key }) => {
             await client.query("COMMIT");
         } catch (error) {
             await client.query("ROLLBACK");
-            if (error.code === "23505" && error.constraint === "transactions_idempotency_key_key") {
-                throw new DuplicateTransactionError();
-            }
             throw error;
         }
     } finally {
